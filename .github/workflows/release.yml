@@ -89,6 +89,8 @@ jobs:
           $out = powershell -NoProfile -ExecutionPolicy Bypass -File "$pkg/setup.ps1" 2>&1 | Out-String
           Write-Host $out
           if ($out -notmatch 'Nenhum \.chd encontrado') { throw 'setup.ps1 in the package did not reach the disc step' }
+          # setup.ps1 exits 1 there on purpose (no disc); that is the expected result.
+          exit 0
 
       - name: SaturnRecomp tests (patched runtime)
         shell: powershell
