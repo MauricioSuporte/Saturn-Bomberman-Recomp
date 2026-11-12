@@ -66,9 +66,20 @@ foreach ($dir in @('disc', 'game')) {
     if (Test-Path -LiteralPath (Join-Path $Stage $dir)) { throw "Pasta proibida no pacote: $dir" }
 }
 
-Compress-Archive -Path $Stage -DestinationPath $Zip -CompressionLevel Optimal
+# Zip entries with '/' separators (Compress-Archive in PowerShell 5.1 writes
+# '\', which other unzip tools treat as part of the file name).
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+$archive = [System.IO.Compression.ZipFile]::Open($Zip, [System.IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($item in Get-ChildItem -LiteralPath $Stage -Recurse -File) {
+        $entry = $Name + '/' + $item.FullName.Substring($Stage.Length + 1).Replace('\', '/')
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $item.FullName, $entry,
+            [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    }
+} finally { $archive.Dispose() }
 $hash = (Get-FileHash -LiteralPath $Zip -Algorithm SHA256).Hash.ToLower()
-Set-Content -LiteralPath (Join-Path $Dist 'SHA256SUMS') -Encoding ascii -Value "$hash  $Name.zip"
+# LF line ending, so `sha256sum -c SHA256SUMS` works everywhere.
+[IO.File]::WriteAllText((Join-Path $Dist 'SHA256SUMS'), "$hash  $Name.zip`n")
 Remove-Item -LiteralPath $Stage -Recurse -Force
 
 $size = [math]::Round((Get-Item -LiteralPath $Zip).Length / 1MB, 1)
