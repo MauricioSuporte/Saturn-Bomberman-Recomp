@@ -1,0 +1,28 @@
+# Firmware, game media and anything derived from them never go into git.
+/BIOS/
+/bios/
+/disc/
+/discs/
+/game/
+/build/
+*.chd
+*.cue
+*.bin
+*.iso
+*.img
+*.ccd
+*.sub
+*.mdf
+*.mds
+*.wav
+*.mp3
+*.state
+*.dmp
+
+# Build output and local tools
+*.exe
+*.dll
+*.o
+*.obj
+*.pdb
+*.spv
