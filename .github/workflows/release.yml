@@ -1,0 +1,147 @@
+name: Release
+
+# Builds the Windows package on a clean runner and, when asked, publishes it
+# as a GitHub release. Run it from Actions > Release > Run workflow:
+#   version          must match the VERSION file (without the "v")
+#   publish_release  off = build and keep the ZIP as a workflow artifact only
+#                    on  = also create the tag v<version> and the release
+# The package never contains a BIOS, a disc image or anything read from the
+# game; tools/package_release.ps1 audits that before zipping.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version matching VERSION (without v)'
+        type: string
+        required: true
+        default: '1.0.0'
+      publish_release:
+        description: 'Publish the GitHub release (tag v<version>)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-mpg123
+            mingw-w64-x86_64-vulkan-headers
+            mingw-w64-x86_64-vulkan-loader
+            mingw-w64-x86_64-shaderc
+            mingw-w64-x86_64-binutils
+
+      - name: Validate version and release notes
+        shell: pwsh
+        run: |
+          $v = $env:RELEASE_VERSION
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid version: $v" }
+          if ((Get-Content VERSION -Raw).Trim() -ne $v) { throw "VERSION is not $v" }
+          if (-not (Test-Path "docs/release-notes/v$v.md")) { throw "Missing docs/release-notes/v$v.md" }
+
+      - name: Build runtime, shaders and launcher (portable CPU target)
+        shell: powershell
+        run: |
+          $bin = Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'mingw64\bin'
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -BuildOnly -Portable -MingwBin $bin
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package and audit
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\package_release.ps1 -Version $env:RELEASE_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Smoke test the packaged tools
+        shell: pwsh
+        run: |
+          $v = $env:RELEASE_VERSION
+          Expand-Archive "dist/saturnbomberman-$v-windows-x64.zip" -DestinationPath smoke
+          $pkg = "smoke/saturnbomberman-$v-windows-x64"
+          foreach ($f in 'SaturnBomberman.exe','build/mkgame.exe','external/SaturnRecomp/recompiler/saturnrecomp.exe',
+                         'external/SaturnRecomp/runner/saturnwin.exe','external/SaturnRecomp/runner/saturnboot.exe',
+                         'external/SaturnRecomp/runner/SDL2.dll','external/SaturnRecomp/runner/shaders/vdp1.comp.spv') {
+            if (-not (Test-Path "$pkg/$f")) { throw "Missing in package: $f" }
+          }
+          # Without a disc and BIOS, setup must stop at the disc step (not at a build step).
+          $out = powershell -NoProfile -ExecutionPolicy Bypass -File "$pkg/setup.ps1" 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'Nenhum \.chd encontrado') { throw 'setup.ps1 in the package did not reach the disc step' }
+
+      - name: SaturnRecomp tests (patched runtime)
+        shell: powershell
+        env:
+          SATURN_MINGW_BIN: ${{ steps.msys2.outputs.msys2-location }}\mingw64\bin
+        run: |
+          Set-Location external/SaturnRecomp
+          powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests/run_all.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: saturnbomberman-windows-x64
+          path: |
+            dist/saturnbomberman-*-windows-x64.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: windows
+    if: ${{ inputs.publish_release }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: saturnbomberman-windows-x64
+          path: dist
+      - name: Verify tag
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if git rev-parse --verify "refs/tags/v${RELEASE_VERSION}" >/dev/null 2>&1; then
+            test "$(git rev-list -n 1 "v${RELEASE_VERSION}")" = "$GITHUB_SHA" || { echo "tag v${RELEASE_VERSION} points elsewhere"; exit 1; }
+          fi
+          cd dist && sha256sum -c SHA256SUMS
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Saturn Bomberman Recomp v${{ inputs.version }} — Windows
+          body_path: docs/release-notes/v${{ inputs.version }}.md
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/saturnbomberman-*-windows-x64.zip
+            dist/SHA256SUMS

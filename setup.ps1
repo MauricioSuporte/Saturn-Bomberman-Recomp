@@ -14,6 +14,12 @@
 #   -Chdman  path to chdman.exe       (default: PATH, repo root, .\tools)
 #   -MingwBin path to mingw64\bin     (default: SATURN_MINGW_BIN or C:\msys64\mingw64\bin)
 #   -SkipBuild  reuse the existing build
+#   -BuildOnly  only build (no disc/BIOS needed); used by the release workflow
+#   -Portable   build for any x86-64-v2 CPU instead of this machine's CPU
+#
+# In a release package (runtime already built, no submodule sources) the
+# submodule, compiler and build steps are skipped automatically: only the
+# disc conversion and game.toml generation run.
 #   -Force      convert the CHD again even if disc\SaturnBomberman.cue exists
 #
 # This file is ASCII on purpose: Windows PowerShell 5.1 misreads UTF-8 without BOM.
@@ -23,6 +29,8 @@ param(
     [string]$Chdman,
     [string]$MingwBin = $env:SATURN_MINGW_BIN,
     [switch]$SkipBuild,
+    [switch]$BuildOnly,
+    [switch]$Portable,
     [switch]$Force
 )
 
@@ -57,7 +65,13 @@ $DiscDir  = Join-Path $Root 'disc'
 $GameDir  = Join-Path $Root 'game'
 $BuildDir = Join-Path $Root 'build'
 $Runner   = Join-Path $Recomp 'runner'
+# A release package ships the built runtime but not the SaturnRecomp sources.
+$Prebuilt = (-not (Test-Path -LiteralPath (Join-Path $Recomp 'tools\build_runtime.ps1'))) -and
+            (Test-Path -LiteralPath (Join-Path $Runner 'saturnwin.exe'))
+if ($Prebuilt) { $SkipBuild = $true }
+if ($Prebuilt -and $BuildOnly) { Fail 'Este e um pacote de release ja compilado; -BuildOnly so vale no repositorio.' }
 
+if (-not $Prebuilt) {
 # ---------------------------------------------------------------- 1. submodule
 Step 'SaturnRecomp (submodulo)'
 if (-not (Test-Path -LiteralPath (Join-Path $Recomp 'tools\build_runtime.ps1'))) {
@@ -81,6 +95,20 @@ foreach ($patch in $patchFiles) {
     Write-Host "patch aplicado: $($patch.Name)"
 }
 
+# -Portable: the runtime build script tunes for the build machine's CPU
+# (-march=native). A published build must run on any 64-bit PC.
+if ($Portable) {
+    $buildScript = Join-Path $Recomp 'tools\build_runtime.ps1'
+    $text = [IO.File]::ReadAllText($buildScript)
+    $tuned = "'-march=native','-mtune=native'"
+    if (-not $text.Contains($tuned)) { Fail 'build_runtime.ps1 mudou; ajuste a opcao -Portable do setup.ps1.' }
+    [IO.File]::WriteAllText($buildScript, $text.Replace($tuned, "'-march=x86-64-v2','-mtune=generic'"))
+    Write-Host 'build portatil: -march=x86-64-v2'
+}
+
+}
+
+if (-not $SkipBuild) {
 # ------------------------------------------------------------------ 2. MinGW
 Step 'Compilador (MSYS2 MinGW-w64)'
 if (-not $MingwBin -and (Test-Path -LiteralPath 'C:\msys64\mingw64\bin\gcc.exe')) {
@@ -111,6 +139,82 @@ if ($missingPackages.Count -gt 0 -and -not $SkipBuild) {
 $env:Path = "$MingwBin;$env:Path"
 $env:SATURN_MINGW_BIN = $MingwBin
 Write-Host "ok: $MingwBin"
+
+}
+
+# ------------------------------------------------------------------ 5. build
+$Cli      = Join-Path $Recomp 'recompiler\saturnrecomp.exe'
+$MkGame   = Join-Path $BuildDir 'mkgame.exe'
+$Runtime  = Join-Path $Runner 'saturnwin.exe'
+$Launcher = Join-Path $Root 'SaturnBomberman.exe'
+
+if (-not $SkipBuild) {
+    Step 'Compilando (a primeira vez leva alguns minutos)'
+    New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
+
+    Push-Location -LiteralPath $Recomp
+    & gcc -O2 -std=c11 -Irecompiler/include -o recompiler/saturnrecomp.exe `
+        recompiler/src/main.c recompiler/src/disc.c recompiler/src/game_config.c `
+        external/sh2-recomp-core/common/sh2_decoder.c
+    $cliStatus = $LASTEXITCODE
+    Pop-Location
+    if ($cliStatus -ne 0) { Fail 'Falha ao compilar o saturnrecomp.exe (CLI).' }
+
+    & gcc -O2 -std=c11 -Iexternal/SaturnRecomp/recompiler/include -o build/mkgame.exe `
+        tools/mkgame.c external/SaturnRecomp/recompiler/src/disc.c
+    if ($LASTEXITCODE -ne 0) { Fail 'Falha ao compilar tools\mkgame.c.' }
+
+    & gcc -O2 -std=c11 -municode -mwindows -o SaturnBomberman.exe tools/launcher.c
+    if ($LASTEXITCODE -ne 0) { Fail 'Falha ao compilar tools\launcher.c.' }
+
+    # The shared runtime (SH-2/68000 cores, VDP1/VDP2, SCSP, Vulkan presenter).
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Recomp 'tools\build_runtime.ps1') `
+        -Output runner/saturnwin.exe -BootOutput runner/saturnboot.exe
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Runtime)) { Fail 'Falha ao compilar o runtime (saturnwin.exe).' }
+
+    $glslc = Join-Path $MingwBin 'glslc.exe'
+    foreach ($shader in @('vdp1.comp', 'vdp2.comp', 'postprocess.comp', 'game_overlay.vert', 'game_overlay.frag')) {
+        $source = Join-Path $Runner "shaders\$shader"
+        & $glslc $source -O -o "$source.spv"
+        if ($LASTEXITCODE -ne 0) { Fail "Falha ao compilar o shader $shader." }
+    }
+
+    # Copy every MinGW DLL the runtime imports (SDL2, the Vulkan loader and
+    # whatever they pull in) beside it, so it starts without MSYS2 on PATH.
+    $objdump = Join-Path $MingwBin 'objdump.exe'
+    if (Test-Path -LiteralPath $objdump) {
+        $queue  = New-Object System.Collections.Queue
+        $copied = @{}
+        $queue.Enqueue($Runtime)
+        while ($queue.Count -gt 0) {
+            $binary = $queue.Dequeue()
+            $imports = @(& $objdump -p $binary 2>$null | Select-String -Pattern 'DLL Name:\s*(\S+)')
+            foreach ($import in $imports) {
+                $name = $import.Matches[0].Groups[1].Value
+                $from = Join-Path $MingwBin $name
+                if ($copied.ContainsKey($name.ToLower()) -or -not (Test-Path -LiteralPath $from)) { continue }
+                $copied[$name.ToLower()] = $true
+                Copy-Item -LiteralPath $from -Destination (Join-Path $Runner $name) -Force
+                $queue.Enqueue($from)
+            }
+        }
+    } else {
+        Copy-Item -LiteralPath (Join-Path $MingwBin 'SDL2.dll') -Destination (Join-Path $Runner 'SDL2.dll') -Force
+    }
+    # Optional: only needed for CUE sheets whose audio tracks are MP3 files.
+    $mpg123 = Join-Path $MingwBin 'libmpg123-0.dll'
+    if (Test-Path -LiteralPath $mpg123) { Copy-Item -LiteralPath $mpg123 -Destination (Join-Path $Runner 'libmpg123-0.dll') -Force }
+    Write-Host 'build ok'
+}
+foreach ($built in @($Cli, $MkGame, $Runtime, $Launcher)) {
+    if (-not (Test-Path -LiteralPath $built)) { Fail "Arquivo de build ausente: $built (rode o setup sem -SkipBuild)." }
+}
+if ($BuildOnly) {
+    Write-Host ''
+    Write-Host 'Build pronto (-BuildOnly: disco, BIOS e game.toml nao foram tocados).' -ForegroundColor Green
+    exit 0
+}
+
 
 # ------------------------------------------------------------------- 3. disc
 Step 'Disco do jogo'
@@ -185,74 +289,6 @@ if ((Get-Item -LiteralPath $Bios).Length -ne $BiosSize) {
     Fail "$Bios nao tem $BiosSize bytes; nao e um dump cru da BIOS do Saturn."
 }
 Write-Host "ok: $Bios"
-
-# ------------------------------------------------------------------ 5. build
-$Cli      = Join-Path $Recomp 'recompiler\saturnrecomp.exe'
-$MkGame   = Join-Path $BuildDir 'mkgame.exe'
-$Runtime  = Join-Path $Runner 'saturnwin.exe'
-$Launcher = Join-Path $Root 'SaturnBomberman.exe'
-
-if (-not $SkipBuild) {
-    Step 'Compilando (a primeira vez leva alguns minutos)'
-    New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
-
-    Push-Location -LiteralPath $Recomp
-    & gcc -O2 -std=c11 -Irecompiler/include -o recompiler/saturnrecomp.exe `
-        recompiler/src/main.c recompiler/src/disc.c recompiler/src/game_config.c `
-        external/sh2-recomp-core/common/sh2_decoder.c
-    $cliStatus = $LASTEXITCODE
-    Pop-Location
-    if ($cliStatus -ne 0) { Fail 'Falha ao compilar o saturnrecomp.exe (CLI).' }
-
-    & gcc -O2 -std=c11 -Iexternal/SaturnRecomp/recompiler/include -o build/mkgame.exe `
-        tools/mkgame.c external/SaturnRecomp/recompiler/src/disc.c
-    if ($LASTEXITCODE -ne 0) { Fail 'Falha ao compilar tools\mkgame.c.' }
-
-    & gcc -O2 -std=c11 -municode -mwindows -o SaturnBomberman.exe tools/launcher.c
-    if ($LASTEXITCODE -ne 0) { Fail 'Falha ao compilar tools\launcher.c.' }
-
-    # The shared runtime (SH-2/68000 cores, VDP1/VDP2, SCSP, Vulkan presenter).
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Recomp 'tools\build_runtime.ps1') `
-        -Output runner/saturnwin.exe -BootOutput runner/saturnboot.exe
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Runtime)) { Fail 'Falha ao compilar o runtime (saturnwin.exe).' }
-
-    $glslc = Join-Path $MingwBin 'glslc.exe'
-    foreach ($shader in @('vdp1.comp', 'vdp2.comp', 'postprocess.comp', 'game_overlay.vert', 'game_overlay.frag')) {
-        $source = Join-Path $Runner "shaders\$shader"
-        & $glslc $source -O -o "$source.spv"
-        if ($LASTEXITCODE -ne 0) { Fail "Falha ao compilar o shader $shader." }
-    }
-
-    # Copy every MinGW DLL the runtime imports (SDL2, the Vulkan loader and
-    # whatever they pull in) beside it, so it starts without MSYS2 on PATH.
-    $objdump = Join-Path $MingwBin 'objdump.exe'
-    if (Test-Path -LiteralPath $objdump) {
-        $queue  = New-Object System.Collections.Queue
-        $copied = @{}
-        $queue.Enqueue($Runtime)
-        while ($queue.Count -gt 0) {
-            $binary = $queue.Dequeue()
-            $imports = @(& $objdump -p $binary 2>$null | Select-String -Pattern 'DLL Name:\s*(\S+)')
-            foreach ($import in $imports) {
-                $name = $import.Matches[0].Groups[1].Value
-                $from = Join-Path $MingwBin $name
-                if ($copied.ContainsKey($name.ToLower()) -or -not (Test-Path -LiteralPath $from)) { continue }
-                $copied[$name.ToLower()] = $true
-                Copy-Item -LiteralPath $from -Destination (Join-Path $Runner $name) -Force
-                $queue.Enqueue($from)
-            }
-        }
-    } else {
-        Copy-Item -LiteralPath (Join-Path $MingwBin 'SDL2.dll') -Destination (Join-Path $Runner 'SDL2.dll') -Force
-    }
-    # Optional: only needed for CUE sheets whose audio tracks are MP3 files.
-    $mpg123 = Join-Path $MingwBin 'libmpg123-0.dll'
-    if (Test-Path -LiteralPath $mpg123) { Copy-Item -LiteralPath $mpg123 -Destination (Join-Path $Runner 'libmpg123-0.dll') -Force }
-    Write-Host 'build ok'
-}
-foreach ($built in @($Cli, $MkGame, $Runtime, $Launcher)) {
-    if (-not (Test-Path -LiteralPath $built)) { Fail "Arquivo de build ausente: $built (rode o setup sem -SkipBuild)." }
-}
 
 # -------------------------------------------------------------- 6. game.toml
 Step 'Gerando game\game.toml a partir do seu disco'
