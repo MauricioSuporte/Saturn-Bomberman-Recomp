@@ -16,12 +16,12 @@ nem à Hudson Soft.
   que sobe o runtime do SaturnRecomp, dá boot pela BIOS real e roda o jogo direto do disco.
   Quando o emissor AOT for publicado, a estrutura daqui (submódulo + `game.toml`) é o ponto
   de partida para usá-lo.
-- **Não foi testado com o jogo.** Tudo foi montado sem acesso ao disco e à BIOS. Foi
-  verificado: a conversão CHD → CUE/BIN e a geração/validação do `game.toml` com um disco
-  sintético, e a compilação para Windows de `tools/mkgame.c`, `tools/launcher.c`, da CLI e
-  do runtime sem janela. Os scripts PowerShell **não** foram executados. Saturn Bomberman
-  não aparece na lista de jogos testados do SaturnRecomp, então pode travar, ter falhas
-  gráficas ou de áudio.
+- **Testado até o menu e o início do jogo.** Com o disco e a BIOS reais, o jogo passa da
+  tela de licença da Sega, mostra a abertura em vídeo, chega à tela de título e aceita o
+  controle (Start abre o menu Game Mode; A entra em Normal/Battle/Master e inicia o modo
+  história), tanto no renderer Vulkan (padrão) quanto no `SATURN_RENDERER=software`. Isso só
+  funciona com as correções de runtime descritas no fim deste arquivo. Fases inteiras, o
+  modo batalha e o áudio ainda não foram verificados a fundo.
 - **Só um controle.** O runtime hoje emula um único controle digital na porta 1: sem
   segundo jogador e sem multitap. Dá para jogar o modo história e batalha contra a CPU.
 - **Saves:** o runtime não grava a memória de backup do Saturn em disco, então o progresso
@@ -123,8 +123,29 @@ aos seus respectivos donos.
 
 ## Correções no runtime
 
-O `setup.ps1` aplica os patches de `patches/` sobre o SaturnRecomp fixado, antes de compilar:
+O `setup.ps1` aplica os patches de `patches/` sobre o SaturnRecomp fixado, antes de compilar.
+São correções genéricas de comportamento do hardware (com o emulador Ymir como referência),
+não ajustes específicos do jogo; cada uma vem com testes do próprio SaturnRecomp.
 
-- `0001-netlink-probe.patch`: o Saturn Bomberman procura o modem NetLink logo depois da tela
-  de licença da Sega e travava ali. O patch emula os registradores que essa verificação usa,
-  com o mesmo comportamento do emulador Ymir.
+- `0001-netlink-probe.patch`: um stub dos registradores do modem NetLink, igual ao do Ymir.
+  Fica **desligado** por padrão (console sem modem, que é o que o jogo espera depois de
+  mandar o SMPC desligar o NetLink); `SATURN_NETLINK=1` liga.
+- `0002-sh2-frt-compare-and-wdt-interrupts.patch`: o SH-2 mestre passa a receber as
+  interrupções de comparação e overflow do FRT (OCIA/OCIB/OVI), e o watchdog (WDT) do SH7604
+  é emulado: contador, divisores, modo timer com interrupção ITI (nível em IPRA, vetor em
+  VCRWDT), modo watchdog, escrita com chave 0xA5/0x5A e limpeza do OVF só após leitura. O
+  jogo usa o FRT como timeout da detecção do NetLink e a ITI do WDT para atender a fila de
+  leitura de arquivos; sem isso ele ficava parado na tela da Sega.
+- `0003-cdblock-current-directory.patch`: o CD block passa a ter diretório atual
+  (Change Directory, 0x70): os IDs de arquivo de Get File Info/Read File e a listagem são
+  relativos a ele, com 0 = o próprio, 1 = pai e 0xFFFFFF = raiz. O jogo entra em `/BOMSS`
+  antes de ler `0KRNL.BIN`.
+- `0004-vdp1-gpu-draw-cost.patch`: no renderer Vulkan, o custo em pixels de um quad
+  enfileirado para a GPU media a altura pelas arestas horizontais, então todo sprite em pé
+  contava como uma linha só. O "Sprite Draw End" chegava antes de o jogo armar a espera por
+  ele e a janela ficava preta depois da abertura. Agora o custo é igual ao da rasterização
+  na CPU.
+
+Para diagnóstico sem janela: `.\diagnose.ps1` (log em `game\diagnose.log`; a cópia da
+memória `game\wram_high.bin` contém código do jogo, não publique). `-Netlink` liga o stub
+do modem.

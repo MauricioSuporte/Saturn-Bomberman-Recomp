@@ -7,9 +7,10 @@
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\diagnose.ps1
 #   ... -Instructions 3000000000     run longer
+#   ... -Netlink                     turn on the NetLink modem stub
 #
 # (ASCII on purpose, see setup.ps1.)
-param([string]$Instructions = '1500000000', [switch]$NoNetlink)
+param([string]$Instructions = '1500000000', [switch]$Netlink)
 
 $ErrorActionPreference = 'Continue'
 $Root    = $PSScriptRoot
@@ -28,15 +29,12 @@ if ($Instructions -notmatch '^\d+$') {
 $env:SATURN_HOT       = '1'   # histogram of the most executed addresses
 $env:SATURN_ILLLOG    = '1'   # illegal-instruction exceptions
 $env:SATURN_SMPC_CMDS = '1'   # system-manager commands (reset, clock change...)
-# Disassembly of the loop the game is stuck in (PC 0x06051C3E..0x06051D3A in
-# the first report) and the last writer of the unmapped byte it hammers.
-$env:SATURN_DUMP      = '0x06051B00:0x300'
-$env:SATURN_WWATCH    = '0x0582503D'
 # Copy of high work RAM (game code and data) at the end of the run, so the
 # stuck code can be disassembled offline. Contains game code: keep it private.
 $env:SATURN_MEMDUMP    = '06000000,0x100000,wram_high.bin'
-# -NoNetlink: behave as if no NetLink modem were present (for comparison).
-if ($NoNetlink) { $env:SATURN_NETLINK = '0' } else { Remove-Item Env:SATURN_NETLINK -ErrorAction SilentlyContinue }
+# The runtime behaves as a console without the NetLink modem (what the game
+# expects on a plain Saturn). -Netlink turns on the modem stub for comparison.
+if ($Netlink) { $env:SATURN_NETLINK = '1' } else { Remove-Item Env:SATURN_NETLINK -ErrorAction SilentlyContinue }
 
 Set-Location -LiteralPath $GameDir
 Write-Host "Rodando $Instructions instrucoes sem janela (pode levar alguns minutos)..."
