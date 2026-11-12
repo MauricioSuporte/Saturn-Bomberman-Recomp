@@ -9,7 +9,7 @@
 #   ... -Instructions 3000000000     run longer
 #
 # (ASCII on purpose, see setup.ps1.)
-param([string]$Instructions = '1500000000')
+param([string]$Instructions = '1500000000', [switch]$NoNetlink)
 
 $ErrorActionPreference = 'Continue'
 $Root    = $PSScriptRoot
@@ -32,6 +32,11 @@ $env:SATURN_SMPC_CMDS = '1'   # system-manager commands (reset, clock change...)
 # the first report) and the last writer of the unmapped byte it hammers.
 $env:SATURN_DUMP      = '0x06051B00:0x300'
 $env:SATURN_WWATCH    = '0x0582503D'
+# Copy of high work RAM (game code and data) at the end of the run, so the
+# stuck code can be disassembled offline. Contains game code: keep it private.
+$env:SATURN_MEMDUMP    = '06000000,0x100000,wram_high.bin'
+# -NoNetlink: behave as if no NetLink modem were present (for comparison).
+if ($NoNetlink) { $env:SATURN_NETLINK = '0' } else { Remove-Item Env:SATURN_NETLINK -ErrorAction SilentlyContinue }
 
 Set-Location -LiteralPath $GameDir
 Write-Host "Rodando $Instructions instrucoes sem janela (pode levar alguns minutos)..."
@@ -43,5 +48,5 @@ $status = $LASTEXITCODE
 $size = 0
 if (Test-Path -LiteralPath $Log) { $size = (Get-Item -LiteralPath $Log).Length }
 Write-Host "Terminou (codigo $status). Log: $Log ($size bytes)"
-Write-Host 'Envie esse arquivo (ou as ultimas ~300 linhas dele).'
+Write-Host "Envie esse arquivo e tambem $(Join-Path $GameDir 'wram_high.bin') (copia da memoria; nao publique)."
 exit 0

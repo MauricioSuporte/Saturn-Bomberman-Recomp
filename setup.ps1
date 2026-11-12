@@ -69,15 +69,15 @@ if (-not (Test-Path -LiteralPath (Join-Path $Recomp 'tools\build_runtime.ps1')))
 Write-Host "ok: $Recomp"
 
 # Runtime fixes this game needs that are not upstream yet (patches\*.patch).
-# Each is applied once; an already applied patch is detected and skipped.
+# The submodule's tracked sources are reset to the pinned commit first, so an
+# updated patch always replaces the previous version cleanly. Build outputs are
+# untracked and stay.
+& git -C $Recomp checkout -- .
+if ($LASTEXITCODE -ne 0) { Fail 'Nao foi possivel restaurar external\SaturnRecomp ao commit fixado.' }
 $patchFiles = @(Get-ChildItem -LiteralPath (Join-Path $Root 'patches') -Filter '*.patch' -File -ErrorAction SilentlyContinue | Sort-Object Name)
 foreach ($patch in $patchFiles) {
-    & git -C $Recomp apply --ignore-whitespace --reverse --check $patch.FullName 2>$null
-    if ($LASTEXITCODE -eq 0) { Write-Host "patch ja aplicado: $($patch.Name)"; continue }
     & git -C $Recomp apply --ignore-whitespace $patch.FullName
-    if ($LASTEXITCODE -ne 0) {
-        Fail "Nao foi possivel aplicar $($patch.Name). Restaure o submodulo com: git -C external/SaturnRecomp checkout -- . e rode o setup de novo."
-    }
+    if ($LASTEXITCODE -ne 0) { Fail "Nao foi possivel aplicar $($patch.Name)." }
     Write-Host "patch aplicado: $($patch.Name)"
 }
 

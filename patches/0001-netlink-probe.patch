@@ -1,8 +1,8 @@
 diff --git a/runner/src/bus.c b/runner/src/bus.c
-index a082bfa..b60a805 100644
+index a082bfa..3ddfa7b 100644
 --- a/runner/src/bus.c
 +++ b/runner/src/bus.c
-@@ -124,6 +124,31 @@ static void vdp1_fb_bus_write(saturn *s, uint32_t a,
+@@ -124,6 +124,44 @@ static void vdp1_fb_bus_write(saturn *s, uint32_t a,
   *
   * Keep this as the ONE predicate used by reads, writes, DMA (which uses the
   * public bus accessors), unmapped accounting, and trace-region reporting. */
@@ -18,8 +18,20 @@ index a082bfa..b60a805 100644
 + * accesses only, as there. */
 +static uint8_t netlink_scr;
 +
++/* SATURN_NETLINK=0 restores the unmapped behaviour (no modem), for comparison. */
++static int netlink_enabled(void)
++{
++    static int on = -1;
++    if (on < 0) {
++        const char *e = getenv("SATURN_NETLINK");
++        on = !(e && e[0] == '0');
++    }
++    return on;
++}
++
 +static int netlink_read8(uint32_t b, uint8_t *v)
 +{
++    if (!netlink_enabled()) return 0;
 +    if (b == 0x0589501Du) { *v = netlink_scr; return 1; }
 +    if (b == 0x05895019u) { *v = 0x30u;       return 1; }
 +    return 0;
@@ -27,6 +39,7 @@ index a082bfa..b60a805 100644
 +
 +static int netlink_write8(uint32_t b, uint8_t v)
 +{
++    if (!netlink_enabled()) return 0;
 +    if (b == 0x0589501Du) { netlink_scr = v; return 1; }
 +    return b == 0x0582503Du;
 +}
@@ -34,7 +47,7 @@ index a082bfa..b60a805 100644
  static int cdb_reg_decode(uint32_t a, uint32_t *off)
  {
      uint32_t rel;
-@@ -871,6 +896,10 @@ uint8_t bus_r8(saturn *s, uint32_t a)
+@@ -871,6 +909,10 @@ uint8_t bus_r8(saturn *s, uint32_t a)
          }
          return (uint8_t)(s->scu_reg[o] >> (8 * (3 - (b & 3))));
      }
@@ -45,7 +58,7 @@ index a082bfa..b60a805 100644
      if (cdb_reg_decode(b, &cdoff)) {
          /* The CD block is a 16-bit peripheral bus. Ymir dispatches byte I/O
           * directly: an even register address returns the low byte of that
-@@ -1126,6 +1155,7 @@ void bus_w8(saturn *s, uint32_t a, uint8_t v)
+@@ -1126,6 +1168,7 @@ void bus_w8(saturn *s, uint32_t a, uint8_t v)
          if (o == 0x01) smpc_ireg0_write(s, v);
          return;
      }
