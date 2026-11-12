@@ -26,3 +26,19 @@
 *.obj
 *.pdb
 *.spv
+
+# A MAME package extracted here (only chdman.exe is used)
+/artwork/
+/bgfx/
+/ctrlr/
+/docs/
+/hash/
+/hlsl/
+/ini/
+/language/
+/plugins/
+/roms/
+/samples/
+/mame.sym
+/uismall.bdf
+/whatsnew.txt
