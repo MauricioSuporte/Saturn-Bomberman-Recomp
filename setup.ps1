@@ -72,9 +72,9 @@ Write-Host "ok: $Recomp"
 # Each is applied once; an already applied patch is detected and skipped.
 $patchFiles = @(Get-ChildItem -LiteralPath (Join-Path $Root 'patches') -Filter '*.patch' -File -ErrorAction SilentlyContinue | Sort-Object Name)
 foreach ($patch in $patchFiles) {
-    & git -C $Recomp apply --reverse --check $patch.FullName 2>$null
+    & git -C $Recomp apply --ignore-whitespace --reverse --check $patch.FullName 2>$null
     if ($LASTEXITCODE -eq 0) { Write-Host "patch ja aplicado: $($patch.Name)"; continue }
-    & git -C $Recomp apply $patch.FullName
+    & git -C $Recomp apply --ignore-whitespace $patch.FullName
     if ($LASTEXITCODE -ne 0) {
         Fail "Nao foi possivel aplicar $($patch.Name). Restaure o submodulo com: git -C external/SaturnRecomp checkout -- . e rode o setup de novo."
     }
