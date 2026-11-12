@@ -28,6 +28,10 @@ if ($Instructions -notmatch '^\d+$') {
 $env:SATURN_HOT       = '1'   # histogram of the most executed addresses
 $env:SATURN_ILLLOG    = '1'   # illegal-instruction exceptions
 $env:SATURN_SMPC_CMDS = '1'   # system-manager commands (reset, clock change...)
+# Disassembly of the loop the game is stuck in (PC 0x06051C3E..0x06051D3A in
+# the first report) and the last writer of the unmapped byte it hammers.
+$env:SATURN_DUMP      = '0x06051B00:0x300'
+$env:SATURN_WWATCH    = '0x0582503D'
 
 Set-Location -LiteralPath $GameDir
 Write-Host "Rodando $Instructions instrucoes sem janela (pode levar alguns minutos)..."
