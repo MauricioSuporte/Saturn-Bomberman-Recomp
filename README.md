@@ -120,3 +120,11 @@ O conteúdo deste repositório está sob a licença do arquivo `LICENSE`. O Satu
 pertence aos seus autores e é apenas referenciado como submódulo (o código dele não é
 copiado para cá). Saturn Bomberman, Sega Saturn e marcas relacionadas pertencem
 aos seus respectivos donos.
+
+## Correções no runtime
+
+O `setup.ps1` aplica os patches de `patches/` sobre o SaturnRecomp fixado, antes de compilar:
+
+- `0001-netlink-probe.patch`: o Saturn Bomberman procura o modem NetLink logo depois da tela
+  de licença da Sega e travava ali. O patch emula os registradores que essa verificação usa,
+  com o mesmo comportamento do emulador Ymir.

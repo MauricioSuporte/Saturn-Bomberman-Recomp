@@ -68,6 +68,19 @@ if (-not (Test-Path -LiteralPath (Join-Path $Recomp 'tools\build_runtime.ps1')))
 }
 Write-Host "ok: $Recomp"
 
+# Runtime fixes this game needs that are not upstream yet (patches\*.patch).
+# Each is applied once; an already applied patch is detected and skipped.
+$patchFiles = @(Get-ChildItem -LiteralPath (Join-Path $Root 'patches') -Filter '*.patch' -File -ErrorAction SilentlyContinue | Sort-Object Name)
+foreach ($patch in $patchFiles) {
+    & git -C $Recomp apply --reverse --check $patch.FullName 2>$null
+    if ($LASTEXITCODE -eq 0) { Write-Host "patch ja aplicado: $($patch.Name)"; continue }
+    & git -C $Recomp apply $patch.FullName
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Nao foi possivel aplicar $($patch.Name). Restaure o submodulo com: git -C external/SaturnRecomp checkout -- . e rode o setup de novo."
+    }
+    Write-Host "patch aplicado: $($patch.Name)"
+}
+
 # ------------------------------------------------------------------ 2. MinGW
 Step 'Compilador (MSYS2 MinGW-w64)'
 if (-not $MingwBin -and (Test-Path -LiteralPath 'C:\msys64\mingw64\bin\gcc.exe')) {
