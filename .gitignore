@@ -33,3 +33,9 @@
 
 # Release packages (tools/package_release.ps1)
 /dist/
+
+# satrecomp: generated from the game (block database, generated C++, saves)
+/work/
+
+# The player's saves and settings (play.ps1)
+/user/

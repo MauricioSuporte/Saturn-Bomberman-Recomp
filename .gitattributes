@@ -1,2 +1,8 @@
 *.patch text eol=lf
 *.yml text eol=lf
+satrecomp/** -text
+*.sh text eol=lf
+*.py text eol=lf
+*.cfg text eol=lf
+Makefile text eol=lf
+games/**/*.txt text eol=lf
