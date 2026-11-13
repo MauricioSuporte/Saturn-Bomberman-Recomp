@@ -32,6 +32,16 @@ Version 2 is a real recompilation:
 The BIOS is replaced by native code (no BIOS image), and the machine around the CPU (video,
 sound, CD drive, controllers) is satrecomp's own.
 
+What is and is not translated:
+
+- **SH-2 (the game's program):** translated to C++, block by block, by a tool. It is generated
+  code, not a hand-written port.
+- **The interpreter stays in the program** as the fallback for code not recorded yet, and for
+  `make check`, which compares it with the translated code. With a complete block database it
+  is never used, but it is not removed.
+- **68000 (the sound driver):** interpreted. The toolkit translates it only in its reference
+  build, which this project does not use.
+
 ### State
 
 Tested with `Saturn Bomberman (USA) (1S)`, product **MK-81070**, version **V1.003**:
@@ -120,6 +130,14 @@ decoding. None is specific to the game. They are in the fork
 `saturn-bomberman`) and proposed upstream in
 [tmcleroy/satrecomp#13](https://github.com/tmcleroy/satrecomp/pull/13).
 
+### Releases
+
+A release here is the source of this repository at a version: scripts, configuration and the
+toolkit copy. It has no program to download, because a built program contains code translated
+from the game. You build it on your PC with `setup.ps1`. To move a build to another PC of
+yours, copy `build\saturn_bomberman\saturn_bomberman.exe`, `saturn_bomberman-launcher.exe` and
+the `.dll` files beside them, plus your disc as `.cue` + `.bin`.
+
 ### Licence
 
 The files of this repository outside `satrecomp/` are under the MIT licence ([LICENSE](LICENSE)).
@@ -146,6 +164,16 @@ Saturn. A versão 2 é uma recompilação de verdade:
 
 A BIOS é substituída por código nativo (nenhuma imagem de BIOS), e a máquina em volta da CPU
 (vídeo, som, CD, controles) é a do próprio satrecomp.
+
+O que é e o que não é traduzido:
+
+- **SH-2 (o programa do jogo):** traduzido para C++, bloco a bloco, por uma ferramenta. É
+  código gerado, não um port escrito à mão.
+- **O interpretador continua dentro do programa** como reserva para código ainda não gravado,
+  e para o `make check`, que o compara com o código traduzido. Com o banco de blocos completo
+  ele nunca é usado, mas não é removido.
+- **68000 (o driver de som):** interpretado. O toolkit só o traduz na sua compilação de
+  referência, que este projeto não usa.
 
 ### Estado
 
@@ -236,6 +264,14 @@ e a decodificação de endereços do drive. Nada é específico do jogo. Estão 
 [MauricioSuporte/satrecomp](https://github.com/MauricioSuporte/satrecomp) (branch
 `saturn-bomberman`) e propostas ao projeto original em
 [tmcleroy/satrecomp#13](https://github.com/tmcleroy/satrecomp/pull/13).
+
+### Releases
+
+Uma release aqui é o código-fonte deste repositório em uma versão: scripts, configuração e a
+cópia do toolkit. Não há programa para baixar, porque um programa compilado contém código
+traduzido do jogo. Você compila no seu PC com o `setup.ps1`. Para levar uma compilação para
+outro PC seu, copie `build\saturn_bomberman\saturn_bomberman.exe`,
+`saturn_bomberman-launcher.exe` e os `.dll` ao lado deles, mais o seu disco em `.cue` + `.bin`.
 
 ### Licença
 
